@@ -1,0 +1,235 @@
+name: Assignment 4 Deployment Pipeline
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: assignment4-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  BUILD_ASSET: activity-log-build.zip
+  BUILD_CHECKSUM: artifact.sha256
+
+jobs:
+  build:
+    name: Build, lint, and test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      artifact-name: ${{ steps.version.outputs.artifact-name }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Generate semantic version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_VERSION="$(node -p "require('./package.json').version")"
+          MAJOR="${BASE_VERSION%%.*}"
+          REST="${BASE_VERSION#*.}"
+          MINOR="${REST%%.*}"
+          VERSION="${MAJOR}.${MINOR}.${GITHUB_RUN_NUMBER}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "artifact-name=activity-log-$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Lint JavaScript syntax
+        run: npm run lint
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Build action bundle
+        run: npm run build
+
+      - name: Package immutable build
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir package
+          cp -R dist action.yml package.json README.md LICENSE package/
+          (cd package && zip -qr "../$BUILD_ASSET" .)
+          sha256sum "$BUILD_ASSET" > "$BUILD_CHECKSUM"
+          cat "$BUILD_CHECKSUM"
+
+      - name: Upload versioned build artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ steps.version.outputs.artifact-name }}
+          path: |
+            ${{ env.BUILD_ASSET }}
+            ${{ env.BUILD_CHECKSUM }}
+          if-no-files-found: error
+          retention-days: 30
+
+  deploy-dev:
+    name: Deploy to dev
+    needs: build
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release helper
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Download immutable build
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: release
+
+      - name: Verify and publish dev release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+          BUILD_TAG: ${{ vars.BUILD_TAG }}
+          RELEASE_NOTE: ${{ vars.RELEASE_NOTE }}
+          RELEASE_ASSET: release/activity-log-build.zip
+          RELEASE_NOTES_FILE: release/dev-notes.md
+          PRERELEASE: 'true'
+        run: |
+          set -euo pipefail
+          (cd release && sha256sum -c artifact.sha256)
+          printf '%s\n\nVersion: %s\nCommit: %s\n' "$RELEASE_NOTE" "$VERSION" "$GITHUB_SHA" > "$RELEASE_NOTES_FILE"
+          export RELEASE_TAG="${BUILD_TAG}-v${VERSION}"
+          export RELEASE_TITLE="Dev ${VERSION}"
+          bash scripts/publish-release.sh
+
+  deploy-staging:
+    name: Deploy to staging
+    needs: [build, deploy-dev]
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release helper
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Download immutable build
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: release
+
+      - name: Verify and publish staging release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+          BUILD_TAG: ${{ vars.BUILD_TAG }}
+          RELEASE_NOTE: ${{ vars.RELEASE_NOTE }}
+          RELEASE_ASSET: release/activity-log-build.zip
+          RELEASE_NOTES_FILE: release/staging-notes.md
+          PRERELEASE: 'true'
+        run: |
+          set -euo pipefail
+          (cd release && sha256sum -c artifact.sha256)
+          printf '%s\n\nVersion: %s\nCommit: %s\n' "$RELEASE_NOTE" "$VERSION" "$GITHUB_SHA" > "$RELEASE_NOTES_FILE"
+          export RELEASE_TAG="${BUILD_TAG}-v${VERSION}"
+          export RELEASE_TITLE="Staging ${VERSION}"
+          bash scripts/publish-release.sh
+
+  ai-release-notes:
+    name: AI release notes and risk review
+    needs: [build, deploy-staging]
+    runs-on: ubuntu-latest
+    environment: release-notes-ai
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout full commit history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Download immutable build checksum
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: release
+
+      - name: Collect untrusted commit history
+        shell: bash
+        run: |
+          set -euo pipefail
+          LAST_PROD_TAG="$(git tag --list 'prod-v*' --sort=-version:refname | head -n 1 || true)"
+          if [[ -n "$LAST_PROD_TAG" ]]; then
+            git log "$LAST_PROD_TAG..HEAD" --max-count=50 --pretty=format:'%h %s' > commits.txt
+          else
+            git log --max-count=25 --pretty=format:'%h %s' > commits.txt
+          fi
+          test -s commits.txt
+
+      - name: Generate draft notes with OpenAI
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AI_MODEL: ${{ vars.AI_MODEL }}
+        run: node scripts/generate-release-notes.mjs commits.txt release/artifact.sha256 ai-release-review.md
+
+      - name: Upload human-review artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ai-release-review-${{ needs.build.outputs.version }}
+          path: ai-release-review.md
+          if-no-files-found: error
+          retention-days: 30
+
+  deploy-production:
+    name: Deploy to production after human approval
+    needs: [build, deploy-staging, ai-release-notes]
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release helper
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Download immutable build
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: release
+
+      - name: Download AI reviewer artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ai-release-review-${{ needs.build.outputs.version }}
+          path: ai-review
+
+      - name: Verify and publish production release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+          BUILD_TAG: ${{ vars.BUILD_TAG }}
+          RELEASE_NOTE: ${{ vars.RELEASE_NOTE }}
+          RELEASE_ASSET: release/activity-log-build.zip
+          RELEASE_NOTES_FILE: release/production-notes.md
+          PRERELEASE: 'false'
+        run: |
+          set -euo pipefail
+          (cd release && sha256sum -c artifact.sha256)
+          {
+            printf '%s\n\nVersion: %s\nCommit: %s\n\n' "$RELEASE_NOTE" "$VERSION" "$GITHUB_SHA"
+            cat ai-review/ai-release-review.md
+          } > "$RELEASE_NOTES_FILE"
+          export RELEASE_TAG="${BUILD_TAG}-v${VERSION}"
+          export RELEASE_TITLE="Production ${VERSION}"
+          bash scripts/publish-release.sh

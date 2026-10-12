@@ -1,4 +1,7 @@
 {
+	"name": "activity-log-a4",
+	"version": "1.0.0",
+	"private": true,
 	"type": "module",
 	"dependencies": {
 		"@actions/core": "^3.0.1",
@@ -10,7 +13,9 @@
 	},
 	"scripts": {
 		"watch": "ncc build src/index.js --watch --license licenses.txt",
-		"build": "bun install && bunx ncc build src/index.js --license licenses.txt",
+		"build": "ncc build src/index.js --license licenses.txt",
+		"lint": "node scripts/lint-source.mjs",
+		"test": "node --test",
 		"lint:commit": "commitlint --last --verbose"
 	},
 	"devDependencies": {

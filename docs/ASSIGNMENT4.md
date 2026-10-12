@@ -1,0 +1,50 @@
+# Assignment 4 deployment pipeline
+
+## Pipeline
+
+The workflow in `.github/workflows/assignment4-pipeline.yml` runs these jobs in order:
+
+1. Build, lint, test, package, and checksum one immutable artifact.
+2. Publish the artifact as a dev prerelease.
+3. Publish the same artifact as a staging prerelease.
+4. Ask OpenAI to draft release notes and a risk summary. The output is an artifact for human review.
+5. Wait at the protected production environment. Production runs only after a human approves it.
+
+## GitHub environments
+
+Configure these environment variables:
+
+| Environment | BUILD_TAG | RELEASE_NOTE |
+| --- | --- | --- |
+| `dev` | `dev` | `Development validation release` |
+| `staging` | `staging` | `Pre-production validation release` |
+| `production` | `prod` | `Approved production release` |
+
+Configure the additional `release-notes-ai` environment with:
+
+- Secret `OPENAI_API_KEY`: an OpenAI API key with billing/credits enabled.
+- Variable `AI_MODEL`: `gpt-5.4-mini`.
+
+The AI job receives only `contents: read`. It has no production environment, production credentials, write token, deployment trigger, or approval capability.
+
+Configure `production` with at least one required reviewer. Enable "Prevent self-review" when a separate reviewer is available, and disable administrator bypass when the repository plan supports it.
+
+## Automation enhancements
+
+- Semantic version: the package major/minor version plus `GITHUB_RUN_NUMBER` produces `1.0.N`.
+- Quality gate: JavaScript syntax lint and unit tests run before packaging.
+- Duplicate release safety: reruns update the existing release and replace the matching asset instead of failing or silently creating another version.
+- Failed publication cleanup: a release and tag created by the current attempt are removed if asset publication fails.
+
+## AI limitations and measurement
+
+Commit messages are incomplete descriptions of code changes. The agent may miss behavioral changes, overstate a vague commit, or omit operational risk. The production reviewer must compare the draft with the diff, test results, and artifact checksum and edit the final notes when necessary.
+
+Measure usefulness for five releases:
+
+- Human editing time in minutes.
+- Percentage of AI statements accepted without changes.
+- Number of missing or incorrect claims found by the reviewer.
+- Whether every high-risk change identified from the diff appears in the risk summary.
+
+The agent adds value only if it reduces review time without increasing missed or incorrect claims.
