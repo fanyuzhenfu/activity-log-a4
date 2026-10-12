@@ -4,6 +4,12 @@ on:
   push:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      require_ai_review:
+        description: Require the real AI release review before Production (O mode)
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -147,6 +153,7 @@ jobs:
   ai-release-notes:
     name: AI release notes and risk review
     needs: [build, deploy-staging]
+    if: github.event_name == 'workflow_dispatch' && inputs.require_ai_review == true
     runs-on: ubuntu-latest
     environment: release-notes-ai
     permissions:
@@ -192,6 +199,15 @@ jobs:
   deploy-production:
     name: Deploy to production after human approval
     needs: [build, deploy-staging, ai-release-notes]
+    if: >-
+      always() &&
+      needs.build.result == 'success' &&
+      needs.deploy-staging.result == 'success' &&
+      (
+        github.event_name != 'workflow_dispatch' ||
+        inputs.require_ai_review != true ||
+        needs['ai-release-notes'].result == 'success'
+      )
     runs-on: ubuntu-latest
     environment: production
     permissions:

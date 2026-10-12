@@ -2,13 +2,29 @@
 
 ## Pipeline
 
-The workflow in `.github/workflows/assignment4-pipeline.yml` runs these jobs in order:
+The workflow in `.github/workflows/assignment4-pipeline.yml` has two explicit modes.
+
+### E mode
+
+Pushes to `master`, or a manual run with `require_ai_review=false`, run these jobs:
+
+1. Build, lint, test, package, and checksum one immutable artifact.
+2. Publish the artifact as a dev prerelease.
+3. Publish the same artifact as a staging prerelease.
+4. Mark the AI job as skipped because it was not requested.
+5. Wait at the protected production environment. Production runs only after a human approves it.
+
+### O mode
+
+A manual run with `require_ai_review=true` runs these jobs:
 
 1. Build, lint, test, package, and checksum one immutable artifact.
 2. Publish the artifact as a dev prerelease.
 3. Publish the same artifact as a staging prerelease.
 4. Ask OpenAI to draft release notes and a risk summary. The output is an artifact for human review.
-5. Wait at the protected production environment. Production runs only after a human approves it.
+5. Enter the protected production environment only if the AI job succeeded. Production still runs only after a human approves it.
+
+An AI failure is never converted into success. It blocks Production in O mode but has no role in an E-mode run.
 
 ## GitHub environments
 
