@@ -26,6 +26,12 @@ A manual run with `require_ai_review=true` runs these jobs:
 
 An AI failure is never converted into success. It blocks Production in O mode but has no role in an E-mode run.
 
+In E mode, Production downloads only the immutable build artifact and creates release notes from the protected production environment variables. In O mode, Production additionally downloads the AI review artifact, verifies that it is non-empty and contains all required review sections, and then includes it in the production release notes.
+
+## Pipeline debugging evidence
+
+Workflow run [#4](https://github.com/fanyuzhenfu/activity-log-a4/actions/runs/38323888922) is intentionally preserved as a real debugging record. Build, Dev, and Staging succeeded, the E-mode AI job was correctly skipped, and a human approved Production. Production then failed because its steps still attempted to download `ai-release-review-1.0.4`. The correction makes both AI artifact download and consumption conditional on O mode; it does not use `continue-on-error` or weaken the production approval rule.
+
 ## GitHub environments
 
 Configure these environment variables:
