@@ -1,5 +1,14 @@
 # Assignment 4 quiz study guide
 
+## My implementation in one minute
+
+- Repository: `fanyuzhenfu/activity-log-a4`.
+- E mode: Build → Dev → Staging → Production. The AI job is explicitly skipped.
+- O mode: Build → Dev → Staging → Copilot AI review → Production.
+- Run #5 proved E mode. Run #6 proved O mode with Copilot and human approval.
+- Run #4 failed because E mode still tried to download a skipped AI artifact. I fixed the production download and validation steps so they run only in O mode.
+- All three `1.0.6` releases used the same ZIP SHA-256: `423EA5117A292FC1F914A13E9ECB66D8E0112E768CCA26C2D67E63EBCD8A7E49`.
+
 ## Key ideas
 
 - A workflow is the YAML automation. A job is one runner-based unit in it. A step is one action or command inside a job.
