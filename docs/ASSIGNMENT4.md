@@ -21,7 +21,7 @@ A manual run with `require_ai_review=true` runs these jobs:
 1. Build, lint, test, package, and checksum one immutable artifact.
 2. Publish the artifact as a dev prerelease.
 3. Publish the same artifact as a staging prerelease.
-4. Ask OpenAI to draft release notes and a risk summary. The output is an artifact for human review.
+4. Run GitHub Copilot CLI with the account's Copilot Free included quota to draft release notes and a risk summary. The output is an artifact for human review.
 5. Enter the protected production environment only if the AI job succeeded. Production still runs only after a human approves it.
 
 An AI failure is never converted into success. It blocks Production in O mode but has no role in an E-mode run.
@@ -42,12 +42,9 @@ Configure these environment variables:
 | `staging` | `staging` | `Pre-production validation release` |
 | `production` | `prod` | `Approved production release` |
 
-Configure the additional `release-notes-ai` environment with:
+The `release-notes-ai` environment isolates the AI job from every deployment environment. The job uses GitHub's short-lived `GITHUB_TOKEN` with only `contents: read` and `copilot-requests: write`; it does not store a long-lived API key. Copilot Free overage is disabled, so exhausted included quota causes failure instead of a charge. The job has no production environment, production credentials, repository write token, deployment trigger, or approval capability.
 
-- Secret `OPENAI_API_KEY`: an OpenAI API key with billing/credits enabled.
-- Variable `AI_MODEL`: `gpt-5.4-mini`.
-
-The AI job receives only `contents: read`. It has no production environment, production credentials, write token, deployment trigger, or approval capability.
+Copilot CLI is pinned to version `1.0.96` and runs in an empty directory. Shell, file read/write, URL, and memory tools are denied. Only the artifact checksum and commit history are placed in the prompt, where commits are explicitly delimited as untrusted data. The generated Markdown must contain all required review sections and remain below the size limit before it can be uploaded.
 
 Configure `production` with at least one required reviewer. Enable "Prevent self-review" when a separate reviewer is available, and disable administrator bypass when the repository plan supports it.
 
